@@ -10,9 +10,11 @@
               
 # Housekeeping  -----------------------------------------------------------
 
-## install and load packages 
+# install and load packages 
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(tidyverse, data.table, here, SCCS, gtsummary, ggplot2)
+pacman::p_load(tidyverse, data.table, here, SCCS, gtsummary, ggplot2, survivalAnalysis)
+
+# save output and error message as a log *sink to be entered 
 
 # Import Data -------------------------------------------------------------
 # need to confirm folder structure and input data format 
@@ -37,11 +39,19 @@ sample_data <- sample_data %>%
 # Data Management ---------------------------------------------------------
 # some data management required before fitting model 
 # should add controls for variable type here when dummy data received 
+# Levels of interest: 
+# 0 - Control Window 
+# 1 - Pre-exposure window 
+# 2 - Day 0 Dose 1 
+# 3 - Dose 1 Risk Window 
+# 4 - Time between Dose 1 and 2 
+# 5 - Day 0 Dose 2 
+# 6 - Dose 2 Risk Window 
 
 tidy_data <- sample_data %>% 
   # start of control window 
   mutate(start_control = vaccd1 - 89) %>% 
-  # start of pre-exposure window NOTE: think this might be simplest way of incorporating? treated as level of the exposure var
+  # start of pre-exposure window 
   mutate(vaccd = vaccd1 - 29) %>% 
   # start of washout
   mutate(vaccd2 = vaccd1 + 29) %>% 
@@ -54,14 +64,20 @@ tidy_data <- sample_data %>%
   # keep those with events 
   filter(myocarditis >= start_control & myocarditis <= end_study)
 
+# create a vector which is every 30 days since study start until end (last week not complete)
+# note 60 day in dummy data to ensure convergence, need to investigate 
+min_start <- min(tidy_data$start_control)
+max_end <- max(tidy_data$end_study)
+calendar_time <- seq(from = min_start+60, to = max_end, by = 60)
+
 # Descriptives ------------------------------------------------------------
 # format data to check length of intervals and nr of events per interval 
 sccs_data <- formatdata(indiv = case, 
                         astart = start_control, 
                         aend = end_study, 
                         aevent = myocarditis, 
-                        adrug = cbind(vaccd, vaccd1+1, vaccd2, vaccd3+1), 
-                        aedrug = cbind(vaccd1, vaccd1 + 28, vaccd3, vaccd3 + 28), 
+                        adrug = cbind(vaccd, vaccd1, vaccd1+1,vaccd2, vaccd3, vaccd3+1), 
+                        aedrug = cbind(vaccd1, vaccd1+1, vaccd1 + 29, vaccd3, vaccd3+1, vaccd3 + 2), 
                         dataformat = "multi",
                         sameexpopar = F, 
                         data = tidy_data) 
@@ -76,8 +92,8 @@ interval_distribution <- sccs_data %>%
                                all_categorical() ~ "{n}")) %>% 
   modify_header(stat_by = "**{level}**") 
 
-interval_distribution
 # need to either print to move code to markdown, print to console or export 
+interval_distribution
 
 # Unadjusted Analyses -----------------------------------------------------
 # precedence given to most recent risk interval - default when data is in wide ("multi") format 
@@ -92,17 +108,17 @@ myocard.mod1 <- standardsccs(event ~ vaccd,
                              dataformat = "multi",
                              sameexpopar = F, 
                              data = tidy_data) 
+
 myocard.mod1 
 
-# Adjusted Analyses -------------------------------------------------------
-# create a vector which is every 2 weeks since study start until end (last week not complete)
-# note, error message if I did not change these to not match astart and aend exactly 
-# requirement for "unique" cut-points, may run into issues here - AS to confirm internally at LSHTM
-min_start <- min(tidy_data$start_control)
-max_end <- max(tidy_data$end_study)
-calendar_time <- seq(from = min_start+1, to = max_end-1, by = 7)
+# extract relevant results and components for meta-analysis from object 
+output.mod1 <- survivalAnalysis::cox_as_data_frame(myocard.mod1)
+output.meta.mod1 <- as.data.frame(myocard.mod1$coefficients)
 
-myocard.mod2 <- standardsccs(event ~ vaccd, 
+# Adjusted Analyses -------------------------------------------------------
+
+# Note - calendar time adjustment is added through a variable called age in this function, as per Farrington et al 2019. 
+myocard.mod2 <- standardsccs(event ~ vaccd + age, 
                              indiv = case, 
                              astart = start_control, 
                              aend = end_study, 
@@ -114,12 +130,34 @@ myocard.mod2 <- standardsccs(event ~ vaccd,
                              sameexpopar = F, 
                              data = tidy_data) 
 myocard.mod2 
-# Note - need to figure out how to add adjustment into model formula (modeling guide recommends as age, data has no age atm)
 
-# Output Results  ---------------------------------------------------------
+# extract relevant results and components for meta-analysis from object 
+output.mod2 <- survivalAnalysis::cox_as_data_frame(myocard.mod2)
+output.meta.mod2 <- as.data.frame(myocard.mod2$coefficients) 
 
+# Format and Output Results  ----------------------------------------------
+  
+output.meta.mod1 <- output.meta.mod1 %>% 
+  rename(yi = `exp(coef)`,
+         sei = `se(coef)`) %>%
+  select(yi, sei) %>%
+  mutate(
+    ncase = myocard.mod1$nevent,
+    nevent = myocard.mod1$nevent,
+    dlab = 1,
+    vaccine_dose = c(1,2,3,4),
+    vaccine_brand = "moderna",
+    subset ="all"
+  )
+
+write.csv(sccs_data, "sccs_data.csv", row.names = FALSE)
 
 # Sensitivity Analyses ----------------------------------------------------
 ## PLACEHOLDER - WHICH ONES TO PRIORITISE 
 
+# send output back to screen
+sink()
+sink(type="message")
 
+
+check <- SCCS::gbsdat

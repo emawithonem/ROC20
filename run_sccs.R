@@ -39,6 +39,7 @@ sample_data <- sample_data %>%
 # Data Management ---------------------------------------------------------
 # some data management required before fitting model 
 # should add controls for variable type here when dummy data received 
+# need to consider if risk windows will be split further 
 # Levels of interest: 
 # 0 - Control Window 
 # 1 - Pre-exposure window 
@@ -48,13 +49,14 @@ sample_data <- sample_data %>%
 # 5 - Day 0 Dose 2 
 # 6 - Dose 2 Risk Window 
 
+# note; assume convention is negative days are exclusive, positive inclusive 
 tidy_data <- sample_data %>% 
   # start of control window 
-  mutate(start_control = vaccd1 - 89) %>% 
+  mutate(start_control = vaccd1 - 91) %>% 
   # start of pre-exposure window 
-  mutate(vaccd = vaccd1 - 29) %>% 
+  mutate(vaccd = vaccd1 - 31) %>% 
   # start of washout
-  mutate(vaccd2 = vaccd1 + 29) %>% 
+  mutate(vaccd2 = vaccd1 + 28) %>% 
   # constrain end to be end of second risk window 
   mutate(end_risk = case_when(!is.na(vaccd3) ~ vaccd3 + 28, 
                                 TRUE ~ vaccd1 + 28)) %>% 
@@ -72,12 +74,14 @@ calendar_time <- seq(from = min_start+60, to = max_end, by = 60)
 
 # Descriptives ------------------------------------------------------------
 # format data to check length of intervals and nr of events per interval 
+# need to double check interval specification, have assumed adrug specification is inclusive, aedrug exclusive 
+# unclear why final risk windows ends up 29 days; may be clearer to specify all these in variables... 
 sccs_data <- formatdata(indiv = case, 
                         astart = start_control, 
                         aend = end_study, 
                         aevent = myocarditis, 
-                        adrug = cbind(vaccd, vaccd1, vaccd1+1,vaccd2, vaccd3, vaccd3+1), 
-                        aedrug = cbind(vaccd1, vaccd1+1, vaccd1 + 29, vaccd3, vaccd3+1, vaccd3 + 2), 
+                        adrug = cbind(vaccd, vaccd1-1, vaccd1, vaccd2, vaccd3-1, vaccd3), 
+                        aedrug = cbind(vaccd1-1, vaccd1, vaccd1+28, vaccd3-1, vaccd3, vaccd3+28), 
                         dataformat = "multi",
                         sameexpopar = F, 
                         data = tidy_data) 
@@ -103,8 +107,8 @@ myocard.mod1 <- standardsccs(event ~ vaccd,
                              astart = start_control, 
                              aend = end_study, 
                              aevent = myocarditis, 
-                             adrug = cbind(vaccd, vaccd1+1, vaccd2, vaccd3+1), 
-                             aedrug = cbind(vaccd1, vaccd1 + 28, vaccd3, vaccd3 + 28), 
+                             adrug = cbind(vaccd, vaccd1-1, vaccd1, vaccd2, vaccd3-1, vaccd3), 
+                             aedrug = cbind(vaccd1-1, vaccd1, vaccd1+28, vaccd3-1, vaccd3, vaccd3+28), 
                              dataformat = "multi",
                              sameexpopar = F, 
                              data = tidy_data) 
@@ -123,8 +127,8 @@ myocard.mod2 <- standardsccs(event ~ vaccd + age,
                              astart = start_control, 
                              aend = end_study, 
                              aevent = myocarditis, 
-                             adrug = cbind(vaccd, vaccd1+1, vaccd2, vaccd3+1), 
-                             aedrug = cbind(vaccd1, vaccd1 + 28, vaccd3, vaccd3 + 28), 
+                             adrug = cbind(vaccd, vaccd1-1, vaccd1, vaccd2, vaccd3-1, vaccd3), 
+                             aedrug = cbind(vaccd1-1, vaccd1, vaccd1+28, vaccd3-1, vaccd3, vaccd3+28), 
                              agegrp = calendar_time, 
                              dataformat = "multi",
                              sameexpopar = F, 
@@ -136,7 +140,10 @@ output.mod2 <- survivalAnalysis::cox_as_data_frame(myocard.mod2)
 output.meta.mod2 <- as.data.frame(myocard.mod2$coefficients) 
 
 # Format and Output Results  ----------------------------------------------
-  
+
+# placeholder - need to format outputs, merge in event counts (don't think this is in model output)
+# placeholder - need to apply redaction to small N 
+
 output.meta.mod1 <- output.meta.mod1 %>% 
   rename(yi = `exp(coef)`,
          sei = `se(coef)`) %>%
@@ -145,12 +152,12 @@ output.meta.mod1 <- output.meta.mod1 %>%
     ncase = myocard.mod1$nevent,
     nevent = myocard.mod1$nevent,
     dlab = 1,
-    vaccine_dose = c(1,2,3,4),
+    vaccine_dose = c(1,2,3,4,5,6),
     vaccine_brand = "moderna",
     subset ="all"
   )
 
-write.csv(sccs_data, "sccs_data.csv", row.names = FALSE)
+write.csv(output.meta.mod1, "output.meta.mod1.csv", row.names = FALSE)
 
 # Sensitivity Analyses ----------------------------------------------------
 ## PLACEHOLDER - WHICH ONES TO PRIORITISE 
@@ -158,6 +165,3 @@ write.csv(sccs_data, "sccs_data.csv", row.names = FALSE)
 # send output back to screen
 sink()
 sink(type="message")
-
-
-check <- SCCS::gbsdat

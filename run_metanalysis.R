@@ -14,6 +14,12 @@
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(tidyverse, data.table, here, SCCS, gtsummary, ggplot2)
 
+library(tidyverse)
+library(data.table)
+library(here)
+library(SCCS)
+library(gtsummary)
+
 # Import Data -------------------------------------------------------------
 # need to confirm folder structure and input data format 
 # input <- fread(here::here("datafolder","inputdata"), data.table = FALSE, na.strings = "")
@@ -123,38 +129,48 @@ myocard.mod2
 # I also realise my table in the SAP as it currently is might not be detailed enough.
 # And this might be a very laborious and roundabout way to make the dataset, because I hardcoded stuff
 # and we'd need to include a variety of results from different vaccines and subgroups
-results <- as.data.frame(myocard.mod1$coefficients) %>%
-  rename(yi = `exp(coef)`,
+
+results <- as.data.frame(cbind(myocard.mod1$conf.int, myocard.mod1$coefficients[,c(1,3)])) %>%
+  rename(irr = `exp(coef)`,
+         lci = `lower .95`,
+         uci = `upper .95`,
+         yi = `coef`,
          sei = `se(coef)`) %>%
-  select(yi, sei) %>%
-  mutate(
-    ncase = nrow(tidy_data),
-    #nevent = sum(ifelse(between(tidy_data$myocarditis, tidy_data$))),
-    dlab = c("BIFAP", "PHARMO", "ARS","CPRD"),
-    vaccine_dose = c(1,2,3,4),
-    vaccine_brand = "moderna",
-    subset ="all"
-    )
+  select(irr, lci, uci, yi, sei) %>%
+  mutate(dlab = c("BIFAP", "PHARMO", "ARS", "CPRD"),
+         ncase = nrow(tidy_data),
+         nevent = c(10,14,35,13),
+         vaccine_dose = 1,
+         vaccine_brand = "moderna", 
+         subset = "all")
 
 # running the meta-analysis
 # for now meta-analysing on vaccine dose but should of course be done across datasets per vaccine and dose
-#install.packages("metafor")
-library(metafor)
+# meta package gives the nicest plots so use that one for now
+# otherwise give same results
+#install.packages("meta")
+library(meta)
 
-# turn data into right format for meta-analysis function (rma.uni)
-meta_data <- escalc(yi = yi, sei = sei, slab = dlab, data = results,  measure = "IRR")
+# only issue is that you cannot removew the 'TE' and 'seTE' columns from the plot without also removing
+# the text on the bottom left of the plot (this is I2 for example)
+# but let's take that for now
+# can also choose to do some after-plotting cleanup in different programme (e.g. Adobe Illustrator)
 
-# meta-analyse and create forest plot
-# I don't know why the 95%CIs in the forest plot are different from the ones from the sccs function. Have to look into that
-meta_analysis <- rma.uni(yi = yi, sei = sei, measure = "IRR", data = meta_data,
-                         slab = dlab)
+# first turn data into required format for plotting function
+meta_analysis <- metagen(data = results, TE = yi, seTE = sei, studlab = dlab, sm = "IRR",
+                          lower = lci, upper = uci,
+                          random = T, fixed = F, n.c = ncase, n.e = nevent,
+                          label.e = "", label.c = "",
+                          label.left = "lower risk", label.right = "higher risk")
 
-forest(meta_analysis, header = c("Dataset", "IRR (95% CI)"), xlab = "Incidence Rate Ratio",
-       mlab = "", ilab = meta_data$ncase,
-       xlim = c(-10, 10), ilab.xpos = -5)
-
-op <- par(cex=0.75, font=2)
-text(-5, "Cases")
+# then plot
+forest.meta(meta_analysis2,
+            sortvar = TE,
+            smlab = "Incidence Rate Ratio",
+            print.tau2 = F,
+            leftcols = c("dlab", "ncase", "nevent"),
+            leftlabs = c("Data source", "Cases", "Events"),
+            just.addcols = "left")
 
 # Sensitivity Analyses ----------------------------------------------------
 ## PLACEHOLDER - WHICH ONES TO PRIORITISE 
